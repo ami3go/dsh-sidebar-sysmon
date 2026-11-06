@@ -1,5 +1,7 @@
 # Sidebar system monitor
 
+[![ci](https://github.com/ami3go/dsh-sidebar-sysmon/actions/workflows/ci.yml/badge.svg)](https://github.com/ami3go/dsh-sidebar-sysmon/actions/workflows/ci.yml)
+
 A Harness Web UI plugin that shows live CPU and memory load at the bottom of the
 left sidebar, in the footer strip beside the Cordis panel action and above
 Settings.
