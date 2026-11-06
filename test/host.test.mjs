@@ -1,23 +1,67 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { apply } from '../index.js'
+import { apply, Config } from '../index.js'
 
-/** Mount the host half against a stub Connection registry. */
-function mount() {
+const FIELD_NAMES = [
+  'refreshMs',
+  'showCpu',
+  'showMem',
+  'showDisk',
+  'showTmp',
+  'diskPath',
+  'tmpPath',
+  'warnPct',
+  'errorPct',
+]
+
+/** Live configuration values behind volatile accessors, as the Loader supplies them. */
+function configStub(overrides = {}) {
+  const values = {
+    refreshMs: 2000,
+    showCpu: true,
+    showMem: true,
+    showDisk: true,
+    showTmp: true,
+    diskPath: '/',
+    tmpPath: '/tmp',
+    warnPct: 60,
+    errorPct: 85,
+    ...overrides,
+  }
+  const config = {}
+  for (const name of FIELD_NAMES) {
+    config[name] = { get: () => values[name] }
+  }
+  return { config, values }
+}
+
+/** Mount the host half against a stub Connection registry and plugin context. */
+function mount(overrides = {}) {
   const routes = new Map()
-  apply({
-    connection: {
-      fetch: {
-        register(route) {
-          routes.set(route.path, route)
+  const { config, values } = configStub(overrides)
+  apply(
+    {
+      fiber: { entry: { options: { id: 'sidebar-sysmon' } } },
+      inject: () => {},
+      connection: {
+        fetch: {
+          register(route) {
+            routes.set(route.path, route)
+          },
         },
       },
     },
-  })
-  return routes
+    config,
+  )
+  return { route: routes.get('/api/sysmon.load'), values }
 }
 
-const route = mount().get('/api/sysmon.load')
+async function read(route) {
+  const response = await route.fetch(new Request('http://dsh.test/api/sysmon.load'))
+  return { response, sample: await response.json() }
+}
+
+const { route } = mount()
 
 test('registers one authenticated read-only GET route', () => {
   assert.ok(route, 'the host half registers /api/sysmon.load')
@@ -25,12 +69,24 @@ test('registers one authenticated read-only GET route', () => {
   assert.equal(route.requestBody, 'buffered')
 })
 
+test('every setting is optional and defaults are declared', () => {
+  const resolved = Config({})
+  const valueOf = (entry) => (entry !== null && typeof entry === 'object' && typeof entry.get === 'function' ? entry.get() : entry)
+  for (const name of FIELD_NAMES) {
+    assert.ok(name in resolved, `${name} resolves its default`)
+  }
+  assert.equal(valueOf(resolved.refreshMs), 2000)
+  assert.equal(valueOf(resolved.diskPath), '/')
+  assert.equal(valueOf(resolved.tmpPath), '/tmp')
+  assert.equal(valueOf(resolved.warnPct), 60)
+  assert.equal(valueOf(resolved.errorPct), 85)
+})
+
 test('serves a no-store snapshot with bounded figures', async () => {
-  const response = await route.fetch(new Request('http://dsh.test/api/sysmon.load'))
+  const { response, sample } = await read(route)
   assert.equal(response.status, 200)
   assert.equal(response.headers.get('cache-control'), 'no-store')
 
-  const sample = await response.json()
   assert.equal(typeof sample.cpu, 'number')
   assert.equal(typeof sample.mem, 'number')
   assert.ok(sample.cpu >= 0 && sample.cpu <= 100, `cpu ${sample.cpu} is a percentage`)
@@ -55,19 +111,32 @@ test('serves a no-store snapshot with bounded figures', async () => {
     assert.ok(sample.disk, 'the root filesystem is measurable on Linux')
     assert.ok(sample.tmp, 'the temp filesystem is measurable on Linux')
   }
+
+  assert.equal(sample.ns, 'sidebar-sysmon', 'the settings namespace is reported')
+  assert.equal(sample.settings.refreshMs, 2000)
+  assert.equal(sample.settings.showCpu, true)
+})
+
+test('reports live settings and hidden meters on every request', async () => {
+  const live = mount({ refreshMs: 5000, showTmp: false, warnPct: 40 })
+  const first = await read(live.route)
+  assert.equal(first.sample.settings.refreshMs, 5000)
+  assert.equal(first.sample.settings.showTmp, false)
+  assert.equal(first.sample.settings.warnPct, 40)
+
+  live.values.refreshMs = 1000
+  live.values.showTmp = true
+  const second = await read(live.route)
+  assert.equal(second.sample.settings.refreshMs, 1000, 'volatile values are re-read per request')
+  assert.equal(second.sample.settings.showTmp, true)
 })
 
 test('stays stable across consecutive requests', async () => {
-  const read = async () => {
-    const response = await route.fetch(new Request('http://dsh.test/api/sysmon.load'))
-    return response.json()
-  }
-
-  const first = await read()
+  const first = await read(route)
   await new Promise((resolve) => setTimeout(resolve, 450))
-  const second = await read()
+  const second = await read(route)
 
-  assert.equal(second.total, first.total, 'total memory is stable')
-  assert.ok(second.cpu >= 0 && second.cpu <= 100)
-  assert.ok(second.mem >= 0 && second.mem <= 100)
+  assert.equal(second.sample.total, first.sample.total, 'total memory is stable')
+  assert.ok(second.sample.cpu >= 0 && second.sample.cpu <= 100)
+  assert.ok(second.sample.mem >= 0 && second.sample.mem <= 100)
 })

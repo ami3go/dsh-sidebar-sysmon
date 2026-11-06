@@ -3,8 +3,13 @@
  *
  * It owns one authenticated read-only Fetch route (`GET /api/sysmon.load`) on
  * the shared Connection channel, so the browser half can poll live CPU,
- * memory, root-disk, and /tmp figures without registering a public web route.
+ * memory, disk, and /tmp figures without registering a public web route.
+ *
+ * Every field is optional and live-editable from the plugin's Settings page:
+ * the values are declared `.volatile()`, so a write changes the running meter
+ * without restarting the entry.
  */
+import z from '@deepseek-ai/schemastery'
 import { readFileSync, statfsSync } from 'node:fs'
 import os from 'node:os'
 
@@ -12,6 +17,21 @@ import os from 'node:os'
 export const inject = ['connection']
 
 const ROUTE = '/api/sysmon.load'
+/** Settings namespace (the profile row id) the client page writes through. */
+export const SETTINGS_NS = 'sidebar-sysmon'
+
+/** Every field is optional: defaults apply when the profile declares nothing. */
+export const Config = z.object({
+  refreshMs: z.natural().min(500).max(60000).default(2000).volatile(),
+  showCpu: z.boolean().default(true).volatile(),
+  showMem: z.boolean().default(true).volatile(),
+  showDisk: z.boolean().default(true).volatile(),
+  showTmp: z.boolean().default(true).volatile(),
+  diskPath: z.string().default('/').volatile(),
+  tmpPath: z.string().default('/tmp').volatile(),
+  warnPct: z.natural().min(1).max(99).default(60).volatile(),
+  errorPct: z.natural().min(2).max(100).default(85).volatile(),
+})
 
 /**
  * Snapshot the aggregate CPU time counters.
@@ -96,19 +116,36 @@ function readSpace(path) {
 }
 
 /**
- * Capacity of the temp directory: `/tmp` when it exists, otherwise the
- * platform's tmpdir.
- * @returns capacity in bytes, or null when unmeasurable.
+ * Read the live (volatile) configuration values.
+ * @param config - Resolved plugin config carrying volatile accessors.
+ * @returns Plain settings object for the wire payload.
  */
-function readTmp() {
-  return readSpace('/tmp') ?? readSpace(os.tmpdir())
+function readSettings(config) {
+  const read = (name, fallback) => {
+    const entry = config === undefined ? undefined : config[name]
+    if (entry !== null && typeof entry === 'object' && typeof entry.get === 'function') return entry.get()
+    return entry === undefined ? fallback : entry
+  }
+  return {
+    refreshMs: read('refreshMs', 2000),
+    showCpu: read('showCpu', true),
+    showMem: read('showMem', true),
+    showDisk: read('showDisk', true),
+    showTmp: read('showTmp', true),
+    diskPath: read('diskPath', '/'),
+    tmpPath: read('tmpPath', '/tmp'),
+    warnPct: read('warnPct', 60),
+    errorPct: read('errorPct', 85),
+  }
 }
 
 /**
  * Build one load sample.
+ * @param config - Resolved plugin config carrying volatile accessors.
  * @returns JSON-serializable CPU, memory, and disk figures for the browser half.
  */
-async function sample() {
+async function sample(config) {
+  const settings = readSettings(config)
   const gap = Date.now() - previous.at
   if (gap > MAX_GAP_MS || gap < MIN_GAP_MS) {
     previous = sampleCpu()
@@ -116,6 +153,8 @@ async function sample() {
   }
   const memory = readMemory()
   const used = Math.max(0, memory.total - memory.available)
+  const diskPath = settings.diskPath.trim() || '/'
+  const tmpPath = settings.tmpPath.trim() || '/tmp'
   return {
     cpu: cpuPercent(),
     mem: memory.total > 0 ? Math.round((used / memory.total) * 1000) / 10 : 0,
@@ -124,8 +163,10 @@ async function sample() {
     cores: os.cpus().length,
     load1: os.loadavg()[0],
     uptime: os.uptime(),
-    disk: readSpace('/'),
-    tmp: readTmp(),
+    disk: readSpace(diskPath),
+    tmp: readSpace(tmpPath) ?? readSpace(os.tmpdir()),
+    settings,
+    ns: SETTINGS_NS,
     at: Date.now(),
   }
 }
@@ -133,15 +174,25 @@ async function sample() {
 /**
  * Register the authenticated snapshot route.
  * @param ctx - Host plugin context providing the Connection service.
+ * @param config - Resolved plugin config (volatile fields read per request).
  */
-export function apply(ctx) {
+export function apply(ctx, config = {}) {
+  // This plugin ships its own Settings page, so no auto-generated form is needed.
+  ctx.inject(['settings'], (child) => {
+    child.effect(() => child.settings.configure({ auto: false }, ctx.fiber))
+  })
+
+  const ns = ctx.fiber?.entry?.options?.id ?? SETTINGS_NS
   ctx.connection.fetch.register({
     path: ROUTE,
     methods: ['GET'],
     requestBody: 'buffered',
-    fetch: async () =>
-      Response.json(await sample(), {
+    fetch: async () => {
+      const body = await sample(config)
+      body.ns = ns
+      return Response.json(body, {
         headers: { 'cache-control': 'no-store' },
-      }),
+      })
+    },
   })
 }
