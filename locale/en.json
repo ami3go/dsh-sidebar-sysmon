@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "CPU and memory meter",
-    "description": "Shows live CPU and memory load at the foot of the sidebar, beside the panel actions."
+    "title": "CPU, memory and disk meter",
+    "description": "Shows live CPU, memory, root-disk, and /tmp load at the foot of the sidebar, beside the panel actions."
   }
 }

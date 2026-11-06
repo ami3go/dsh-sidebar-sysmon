@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "CPU 与内存占用",
-    "description": "在侧边栏底部、面板操作旁显示实时的 CPU 和内存占用。"
+    "title": "CPU、内存与磁盘占用",
+    "description": "在侧边栏底部、面板操作旁显示实时的 CPU、内存、磁盘和 /tmp 占用。"
   }
 }

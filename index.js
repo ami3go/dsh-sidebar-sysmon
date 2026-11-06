@@ -2,10 +2,10 @@
  * Host half of the sidebar system monitor.
  *
  * It owns one authenticated read-only Fetch route (`GET /api/sysmon.load`) on
- * the shared Connection channel, so the browser half can poll live CPU and
- * memory figures without registering a public web route.
+ * the shared Connection channel, so the browser half can poll live CPU,
+ * memory, root-disk, and /tmp figures without registering a public web route.
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, statfsSync } from 'node:fs'
 import os from 'node:os'
 
 /** Connection must exist before the route can be registered. */
@@ -73,8 +73,40 @@ function readMemory() {
 }
 
 /**
+ * Free and total bytes of the filesystem holding `path`.
+ * @param path - Existing path on the filesystem to measure.
+ * @returns capacity in bytes, or null when the path cannot be measured.
+ */
+function readSpace(path) {
+  try {
+    const stats = statfsSync(path)
+    const total = Number(stats.blocks) * Number(stats.bsize)
+    const free = Number(stats.bavail) * Number(stats.bsize)
+    if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(free)) return null
+    const available = Math.max(0, Math.min(total, free))
+    return {
+      total,
+      free: available,
+      used: total - available,
+      pct: Math.round(((total - available) / total) * 1000) / 10,
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Capacity of the temp directory: `/tmp` when it exists, otherwise the
+ * platform's tmpdir.
+ * @returns capacity in bytes, or null when unmeasurable.
+ */
+function readTmp() {
+  return readSpace('/tmp') ?? readSpace(os.tmpdir())
+}
+
+/**
  * Build one load sample.
- * @returns JSON-serializable CPU and memory figures for the browser half.
+ * @returns JSON-serializable CPU, memory, and disk figures for the browser half.
  */
 async function sample() {
   const gap = Date.now() - previous.at
@@ -84,15 +116,16 @@ async function sample() {
   }
   const memory = readMemory()
   const used = Math.max(0, memory.total - memory.available)
-  const cores = os.cpus().length
   return {
     cpu: cpuPercent(),
     mem: memory.total > 0 ? Math.round((used / memory.total) * 1000) / 10 : 0,
     total: memory.total,
     used,
-    cores,
+    cores: os.cpus().length,
     load1: os.loadavg()[0],
     uptime: os.uptime(),
+    disk: readSpace('/'),
+    tmp: readTmp(),
     at: Date.now(),
   }
 }

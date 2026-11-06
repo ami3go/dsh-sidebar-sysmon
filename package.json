@@ -1,9 +1,9 @@
 {
   "name": "@local/sidebar-sysmon",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
-  "description": "Live CPU and memory meter in the Harness Web sidebar foot",
+  "description": "Live CPU, memory, disk, and /tmp meter in the Harness Web sidebar foot",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -19,11 +19,15 @@
     "icon.svg"
   ],
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "immediately": true,
-      "inject": ["@deepseek-ai/dsh-client-ui-sidebar"]
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
     }
   },
   "scripts": {

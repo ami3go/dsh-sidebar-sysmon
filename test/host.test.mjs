@@ -40,6 +40,21 @@ test('serves a no-store snapshot with bounded figures', async () => {
   assert.ok(sample.cores >= 1, 'at least one core is reported')
   assert.ok(sample.load1 >= 0, 'load average is non-negative')
   assert.ok(Math.abs(Date.now() - sample.at) < 5_000, 'the sample is fresh')
+
+  for (const key of ['disk', 'tmp']) {
+    assert.ok(key in sample, `${key} is reported`)
+    const space = sample[key]
+    if (space === null) continue // statfs unavailable on this platform
+    assert.ok(space.total > 0, `${key} total is positive`)
+    assert.ok(space.free >= 0 && space.free <= space.total, `${key} free stays within total`)
+    assert.equal(space.used, space.total - space.free, `${key} used is total minus free`)
+    assert.ok(space.pct >= 0 && space.pct <= 100, `${key} percent is bounded`)
+  }
+
+  if (process.platform === 'linux') {
+    assert.ok(sample.disk, 'the root filesystem is measurable on Linux')
+    assert.ok(sample.tmp, 'the temp filesystem is measurable on Linux')
+  }
 })
 
 test('stays stable across consecutive requests', async () => {
