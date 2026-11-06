@@ -53,8 +53,7 @@ No build step and no dependencies. The host half's route is covered by
 npm test
 ```
 
-CI (`.github/workflows/ci.yml`) parses both halves and runs the tests on Node 20
-and 22.
+CI (`.github/workflows/ci.yml`) parses both halves and runs the tests on Node 20, 22, and 24.
 
 ## Notes
 
