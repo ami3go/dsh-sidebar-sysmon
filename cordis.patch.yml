@@ -1,0 +1,3 @@
+- insert:
+    - id: sidebar-sysmon
+      name: '@local/sidebar-sysmon'

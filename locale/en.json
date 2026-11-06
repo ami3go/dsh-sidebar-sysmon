@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "CPU and memory meter",
+    "description": "Shows live CPU and memory load at the foot of the sidebar, beside the panel actions."
+  }
+}
