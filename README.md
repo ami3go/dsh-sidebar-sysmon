@@ -28,7 +28,7 @@ Installed as the profile bundle `@local/sidebar-sysmon` from this directory
 (linked install, so edits here are picked up after the entry restarts):
 
 ```text
-plugin_manager install_bundle /path/to/dsh-plugins/sidebar-sysmon
+plugin_manager install_bundle /path/to/dsh-sidebar-sysmon
 ```
 
 Disable/hide it without uninstalling:
@@ -43,6 +43,18 @@ Remove:
 ```text
 plugin_manager remove_bundle @local/sidebar-sysmon
 ```
+
+## Development
+
+No build step and no dependencies. The host half's route is covered by
+`node:test` against a stub Connection registry:
+
+```bash
+npm test
+```
+
+CI (`.github/workflows/ci.yml`) parses both halves and runs the tests on Node 20
+and 22.
 
 ## Notes
 

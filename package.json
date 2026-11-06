@@ -25,5 +25,8 @@
       "immediately": true,
       "inject": ["@deepseek-ai/dsh-client-ui-sidebar"]
     }
+  },
+  "scripts": {
+    "test": "node --test test/host.test.mjs"
   }
 }
