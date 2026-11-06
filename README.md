@@ -14,6 +14,8 @@ action and above Settings.
 - Bars shift accent → amber at the warning threshold → red at the critical one.
 - Updates on the configured interval; pauses while the tab is hidden and keeps
   the last good sample when a request fails.
+- **⋯ button** in the meter opens a quick popover with on/off switches for
+  CPU, Memory, Disk, and `/tmp` — the same live values as the Settings page.
 - **Settings → Plugins → System monitor** configures every parameter live.
 
 ## Settings

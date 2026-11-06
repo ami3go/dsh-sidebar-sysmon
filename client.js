@@ -2,6 +2,7 @@ window.__ModuleLoader__.load({
   id: '@local/sidebar-sysmon',
   factory(require) {
     const React = require('react')
+    const { createPortal } = require('react-dom')
     const h = React.createElement
 
     /** Relative to the page directory, like the shipped Connection Fetch clients. */
@@ -125,9 +126,222 @@ window.__ModuleLoader__.load({
       return `${Math.round(gb)}G`
     }
 
+    /** A small on/off switch. */
+    function Switch({ on }) {
+      return h(
+        'span',
+        {
+          'aria-hidden': true,
+          style: {
+            flex: 'none',
+            width: 26,
+            height: 14,
+            borderRadius: 999,
+            background: on ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l2)',
+            position: 'relative',
+            transition: 'background 150ms ease',
+          },
+        },
+        h('span', {
+          style: {
+            position: 'absolute',
+            top: 1,
+            left: on ? 13 : 1,
+            width: 12,
+            height: 12,
+            borderRadius: '50%',
+            background: '#fff',
+            transition: 'left 150ms ease',
+          },
+        }),
+      )
+    }
+
+    /** The meter's ⋯ button; opens the quick on/off menu. */
+    function MenuButton({ open, onClick, inputRef, t }) {
+      const [hover, setHover] = React.useState(false)
+      return h(
+        'button',
+        {
+          ref: inputRef,
+          type: 'button',
+          'aria-label': t('menuLabel'),
+          'aria-haspopup': 'menu',
+          'aria-expanded': open,
+          title: t('menuLabel'),
+          onClick: onClick,
+          onMouseEnter: () => setHover(true),
+          onMouseLeave: () => setHover(false),
+          style: {
+            flex: 'none',
+            width: 18,
+            height: 18,
+            padding: 0,
+            border: 'none',
+            borderRadius: 4,
+            background: hover || open ? 'var(--dsw-alias-bg-layer-2)' : 'transparent',
+            color: 'var(--dsw-alias-label-secondary)',
+            cursor: 'pointer',
+            display: 'grid',
+            placeItems: 'center',
+          },
+        },
+        h(
+          'svg',
+          { viewBox: '0 0 16 16', width: 13, height: 13, fill: 'currentColor', 'aria-hidden': true },
+          h('circle', { cx: 3, cy: 8, r: 1.4 }),
+          h('circle', { cx: 8, cy: 8, r: 1.4 }),
+          h('circle', { cx: 13, cy: 8, r: 1.4 }),
+        ),
+      )
+    }
+
+    const MENU_ITEMS = [
+      ['showCpu', 'showCpu'],
+      ['showMem', 'showMem'],
+      ['showDisk', 'showDisk'],
+      ['showTmp', 'showTmp'],
+    ]
+    const MENU_WIDTH = 176
+
+    /** Quick on/off popover for the four meters. */
+    function MeterMenu({ anchorRef, form, settings, onClose, t }) {
+      const [pos, setPos] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      const panelRef = React.useRef(null)
+
+      const snapshot = React.useSyncExternalStore(
+        React.useCallback((listener) => form.subscribe(listener), [form]),
+        React.useCallback(() => form.getSnapshot(), [form]),
+      )
+
+      React.useLayoutEffect(() => {
+        const button = anchorRef.current
+        if (!button) return
+        const rect = button.getBoundingClientRect()
+        setPos({
+          left: Math.max(8, Math.min(rect.left, window.innerWidth - MENU_WIDTH - 8)),
+          bottom: Math.max(8, window.innerHeight - rect.top + 8),
+        })
+      }, [anchorRef])
+
+      React.useEffect(() => {
+        const onPointerDown = (event) => {
+          const panel = panelRef.current
+          const button = anchorRef.current
+          if (panel && panel.contains(event.target)) return
+          if (button && button.contains(event.target)) return
+          onClose()
+        }
+        const onKey = (event) => {
+          if (event.key === 'Escape') onClose()
+        }
+        document.addEventListener('pointerdown', onPointerDown, true)
+        document.addEventListener('keydown', onKey)
+        return () => {
+          document.removeEventListener('pointerdown', onPointerDown, true)
+          document.removeEventListener('keydown', onKey)
+        }
+      }, [anchorRef, onClose])
+
+      const source = snapshot.status === 'ready' && snapshot.value ? snapshot.value : settings
+      const locked = snapshot.status === 'ready' && !snapshot.writable
+
+      const toggle = (field) => {
+        setError(null)
+        const next = source[field] === false
+        form
+          .set(field, next)
+          .then((accepted) => {
+            if (!accepted) setError(t('settingsRefused'))
+          })
+          .catch((cause) => {
+            setError(cause instanceof Error ? cause.message : String(cause))
+          })
+      }
+
+      if (pos === null) return null
+
+      return createPortal(
+        h(
+          'div',
+          {
+            ref: panelRef,
+            role: 'menu',
+            'aria-label': t('meters'),
+            style: {
+              position: 'fixed',
+              left: pos.left,
+              bottom: pos.bottom,
+              width: MENU_WIDTH,
+              zIndex: 10000,
+              background: 'var(--dsw-alias-bg-overlay)',
+              border: '1px solid var(--dsw-alias-border-l1)',
+              borderRadius: 10,
+              padding: 6,
+              boxShadow: '0 8px 28px rgba(0, 0, 0, 0.28)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2,
+            },
+          },
+          h(
+            'div',
+            { style: { ...LABEL, fontSize: 10, letterSpacing: '0.06em', fontWeight: 600, padding: '4px 6px 2px' } },
+            t('meters'),
+          ),
+          MENU_ITEMS.map(([field, label]) =>
+            h(
+              'button',
+              {
+                key: field,
+                type: 'button',
+                role: 'menuitemcheckbox',
+                'aria-checked': source[field] !== false,
+                disabled: locked,
+                onClick: () => toggle(field),
+                style: {
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 10,
+                  width: '100%',
+                  padding: '6px 8px',
+                  background: 'transparent',
+                  border: 'none',
+                  borderRadius: 6,
+                  color: 'var(--dsw-alias-label-primary)',
+                  font: 'inherit',
+                  fontSize: 12,
+                  cursor: locked ? 'default' : 'pointer',
+                  textAlign: 'left',
+                },
+              },
+              h('span', null, t(label)),
+              h(Switch, { on: source[field] !== false }),
+            ),
+          ),
+          error === null
+            ? null
+            : h(
+                'div',
+                { style: { color: 'var(--dsw-alias-state-error-primary)', fontSize: 11, padding: '4px 6px' } },
+                error,
+              ),
+        ),
+        document.body,
+      )
+    }
+
     /** The sidebar meter; settings arrive with each poll. */
-    function SystemMonitor({ wide, t }) {
+    function SystemMonitor({ wide, t, ctx }) {
       const [data, setData] = React.useState(null)
+      const [menuOpen, setMenuOpen] = React.useState(false)
+      const buttonRef = React.useRef(null)
+      const closeMenu = React.useCallback(() => setMenuOpen(false), [])
+      const forms = ctx.get('configForms')
+      const ns = data && typeof data.ns === 'string' && data.ns.length > 0 ? data.ns : NS
+      const form = React.useMemo(() => (forms ? forms.get(ns) : undefined), [forms, ns])
       const pollMs = normalizeRefresh(data && data.settings ? data.settings.refreshMs : undefined)
 
       React.useEffect(() => {
@@ -193,7 +407,40 @@ window.__ModuleLoader__.load({
           ready: tmp !== null,
         })
       }
-      if (metrics.length === 0) return null
+      const menuButton = form
+        ? h(MenuButton, {
+            open: menuOpen,
+            onClick: () => setMenuOpen((value) => !value),
+            inputRef: buttonRef,
+            t: t,
+          })
+        : null
+      const menu = menuOpen && form ? h(MeterMenu, { anchorRef: buttonRef, form, settings, onClose: closeMenu, t }) : null
+
+      if (metrics.length === 0) {
+        if (!menuButton) return null
+        return h(
+          React.Fragment,
+          null,
+          wide
+            ? h(
+                'div',
+                {
+                  style: {
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'flex-end',
+                    flex: '1 1 auto',
+                    minWidth: 0,
+                    padding: '0 6px 2px',
+                  },
+                },
+                menuButton,
+              )
+            : h('div', { style: { display: 'flex', justifyContent: 'center', width: 34, padding: '2px 0' } }, menuButton),
+          menu,
+        )
+      }
 
       const parts = []
       if (!ready) {
@@ -246,6 +493,8 @@ window.__ModuleLoader__.load({
               ),
             ),
           ),
+          menuButton === null ? null : h('div', { style: { display: 'flex', justifyContent: 'center', paddingTop: 2 } }, menuButton),
+          menu,
         )
       }
 
@@ -256,11 +505,9 @@ window.__ModuleLoader__.load({
           'aria-label': title,
           title: title,
           style: {
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
-            columnGap: 10,
-            rowGap: 3,
-            alignContent: 'center',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 2,
             flex: '1 1 auto',
             minWidth: 0,
             padding: '0 6px 0 2px',
@@ -268,17 +515,33 @@ window.__ModuleLoader__.load({
             userSelect: 'none',
           },
         },
-        metrics.map((metric) =>
-          h(Lane, {
-            key: metric.key,
-            label: metric.label,
-            value: metric.pct,
-            text: metric.text,
-            ready: metric.ready,
-            warn: warn,
-            error: error,
-          }),
+        h(
+          'div',
+          {
+            style: {
+              display: 'grid',
+              gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+              columnGap: 10,
+              rowGap: 3,
+              alignContent: 'center',
+              flex: '1 1 auto',
+              minWidth: 0,
+            },
+          },
+          metrics.map((metric) =>
+            h(Lane, {
+              key: metric.key,
+              label: metric.label,
+              value: metric.pct,
+              text: metric.text,
+              ready: metric.ready,
+              warn: warn,
+              error: error,
+            }),
+          ),
         ),
+        menuButton,
+        menu,
       )
     }
 
@@ -536,6 +799,7 @@ window.__ModuleLoader__.load({
               tipTmp: '/tmp {free} of {total} GB free',
               tipDiskMissing: 'disk unavailable',
               tipTmpMissing: '/tmp unavailable',
+              menuLabel: 'Show or hide meters',
               settingsTab: 'System monitor',
               settingsIntro:
                 'Choose which meters the sidebar shows and how often it refreshes. Changes apply immediately and persist in the profile configuration.',
@@ -565,6 +829,7 @@ window.__ModuleLoader__.load({
               tipTmp: '/tmp 剩余 {free}/{total} GB',
               tipDiskMissing: '磁盘不可用',
               tipTmpMissing: '/tmp 不可用',
+              menuLabel: '显示或隐藏指标',
               settingsTab: '系统监视器',
               settingsIntro: '选择侧边栏显示哪些指标以及刷新频率。更改立即生效并保存在配置中。',
               settingsLoading: '正在加载配置…',
@@ -596,7 +861,7 @@ window.__ModuleLoader__.load({
               order: -10,
               label: () => t('label'),
             },
-            (props) => h(SystemMonitor, { wide: props.wide, t: t }),
+            (props) => h(SystemMonitor, { wide: props.wide, t: t, ctx: ctx }),
           ),
         )
 
